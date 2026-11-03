@@ -38,6 +38,8 @@ const envSchema = z.object({
 
   RATE_LIMIT_UPLOAD_MAX: int(30),
   RATE_LIMIT_POLL_MAX: int(240),
+  RATE_LIMIT_IP_UPLOAD_MAX: int(120),
+  RATE_LIMIT_IP_POLL_MAX: int(600),
   RATE_LIMIT_WINDOW_MS: int(60_000),
 
   SHUTDOWN_GRACE_MS: int(25_000),
@@ -76,8 +78,16 @@ export type Config = {
   xlsxPrintFixes: boolean;
   xlsxPrepMaxBytes: number;
   rateLimit: {
+    /** Per device (X-Device-Id); skipped for requests without one. */
     uploadMax: number;
     pollMax: number;
+    /**
+     * Per client IP, across all upload (or poll) endpoints together. Stops clients that rotate device ids, and is
+     * the only limit for the legacy endpoint. Kept well above the per-device limit because carrier-grade NAT puts
+     * many phones behind one IP.
+     */
+    ipUploadMax: number;
+    ipPollMax: number;
     windowMs: number;
   };
   shutdownGraceMs: number;
@@ -140,6 +150,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     rateLimit: {
       uploadMax: e.RATE_LIMIT_UPLOAD_MAX,
       pollMax: e.RATE_LIMIT_POLL_MAX,
+      ipUploadMax: e.RATE_LIMIT_IP_UPLOAD_MAX,
+      ipPollMax: e.RATE_LIMIT_IP_POLL_MAX,
       windowMs: e.RATE_LIMIT_WINDOW_MS,
     },
     shutdownGraceMs: e.SHUTDOWN_GRACE_MS,

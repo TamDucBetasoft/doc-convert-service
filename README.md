@@ -169,7 +169,9 @@ LibreOffice in file Excel khác cách người dùng thấy trong Excel / Google
 Đánh đổi đã biết: sheet cực rộng (ví dụ bảng ảnh trải ngang hàng chục cột) bị thu nhỏ cho vừa 1 trang ngang nên chữ/ảnh rất nhỏ; trước đây sheet đó bị cắt thành nhiều trang. Hàm thay đổi theo thời gian (`TODAY()`, `NOW()`) in ra giá trị lúc lưu file. Chỉ áp dụng `.xlsx` (`.xls` đời cũ là định dạng nhị phân, không sửa).
 
 Mỗi lần đổi logic chuẩn bị/convert khiến cùng một file ra PDF khác: tăng `CONVERSION_REVISION` trong `src/jobService.ts` để cache không trả PDF cũ.
-| `RATE_LIMIT_UPLOAD_MAX` / `RATE_LIMIT_POLL_MAX` / `RATE_LIMIT_WINDOW_MS` | 30 / 240 / 60 s | Giới hạn lượt theo thiết bị/IP |
+| `RATE_LIMIT_UPLOAD_MAX` / `RATE_LIMIT_POLL_MAX` | 30 / 240 | Giới hạn mỗi **thiết bị** (`X-Device-Id`) trong 1 cửa sổ; request không gửi id thì bỏ qua lớp này |
+| `RATE_LIMIT_IP_UPLOAD_MAX` / `RATE_LIMIT_IP_POLL_MAX` | 120 / 600 | **Trần mỗi IP**, cộng dồn mọi endpoint upload (hoặc hỏi trạng thái). Chặn client đổi device id liên tục; là giới hạn duy nhất của `/convert_to_pdf`. Để cao hơn mức thiết bị vì nhà mạng di động (CGNAT) cho nhiều máy chung 1 IP |
+| `RATE_LIMIT_WINDOW_MS` | 60 s | Cửa sổ đếm cho cả hai lớp |
 
 ---
 
@@ -255,7 +257,7 @@ Mỗi lần đổi logic chuẩn bị/convert khiến cùng một file ra PDF kh
 Giới hạn cần biết:
 - **API key nằm trong APK nên có thể bị trích ra.** Nó chặn bot quét bừa, không chặn kẻ tấn công có chủ đích.
   Lớp mạnh hơn: Play Integrity API (kế hoạch giai đoạn 2).
-- `X-Device-Id` do client tự khai, nên kẻ xấu có thể đổi id để né giới hạn theo thiết bị.
+- `X-Device-Id` do client tự khai: đổi id liên tục né được giới hạn theo thiết bị nhưng vẫn vướng **trần theo IP**; kẻ có nhiều IP (botnet, proxy xoay vòng) thì cần lớp chặn ở Cloudflare/Nginx hoặc Play Integrity.
   `QUEUE_MAX_PENDING` vẫn bảo vệ năng lực xử lý; Play Integrity sẽ giải quyết triệt để.
 - Kích thước khai trong zip có thể bị làm giả; chốt chặn cuối là `mem_limit` của container Gotenberg và timeout.
 - Endpoint cũ `/convert_to_pdf` không có key (bắt buộc để không làm vỡ app cũ); chỉ được bảo vệ bằng giới hạn lượt theo IP.

@@ -28,16 +28,16 @@ async function convertAndWait(ctx: RouteContext, caller: Caller, request: Fastif
 
 /** Synchronous endpoints: the response body is the PDF itself. */
 export function registerConvertRoutes(app: FastifyInstance, ctx: RouteContext, requireKey: preHandlerAsyncHookHandler) {
-  const config = { rateLimit: { max: ctx.config.rateLimit.uploadMax, timeWindow: ctx.config.rateLimit.windowMs } };
+  const config = { rateLimit: ctx.limits.deviceUpload };
 
   if (ctx.config.legacyEndpointEnabled) {
     // Contract of the previous backend, used by app builds that predate /v2: no key, field "file", PDF body.
-    app.post('/convert_to_pdf', { config }, async (request, reply) =>
+    app.post('/convert_to_pdf', { config, preHandler: [ctx.limits.ipUpload] }, async (request, reply) =>
       convertAndWait(ctx, { appId: LEGACY_APP_ID, deviceId: readDeviceId(request) }, request, reply),
     );
   }
 
-  app.post('/v2/convert', { config, preHandler: requireKey }, async (request, reply) =>
+  app.post('/v2/convert', { config, preHandler: [ctx.limits.ipUpload, requireKey] }, async (request, reply) =>
     convertAndWait(ctx, { appId: request.appId, deviceId: request.deviceId }, request, reply),
   );
 }

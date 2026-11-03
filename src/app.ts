@@ -1,14 +1,15 @@
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import Fastify, { type FastifyBaseLogger, type FastifyError } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyError, type preHandlerAsyncHookHandler } from 'fastify';
 import type { Redis } from 'ioredis';
-import { apiKeyGuard, createKeyResolver, rateLimitKey } from './auth.js';
+import { apiKeyGuard, createKeyResolver, deviceRateLimitKey, lacksDeviceId } from './auth.js';
 import type { Config } from './config.js';
 import { AppError, Errors, isAppError } from './errors.js';
 import type { PdfConverter } from './gotenberg.js';
 import { JobService } from './jobService.js';
 import type { JobStore } from './jobStore.js';
 import { createMetrics } from './metrics.js';
+import type { RouteLimits } from './routes/context.js';
 import { registerConvertRoutes } from './routes/convert.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerJobRoutes } from './routes/jobs.js';
@@ -61,9 +62,27 @@ export async function buildApp(deps: AppDeps) {
     global: false,
     redis: deps.redis,
     nameSpace: 'pcs:rl:',
-    keyGenerator: rateLimitKey,
+    keyGenerator: deviceRateLimitKey,
     errorResponseBuilder: (_request, context) => Errors.rateLimited(Math.max(1, Math.ceil(context.ttl / 1000))),
   });
+
+  // The plugin's own hooks run at most one limiter per request (it marks the request after the first), so the
+  // per-device route limit would silence app.rateLimit(). createRateLimit() only counts, letting both layers apply.
+  const ipCeiling = (prefix: string, max: number): preHandlerAsyncHookHandler => {
+    const check = app.createRateLimit({ max, timeWindow: config.rateLimit.windowMs, keyGenerator: (req) => `${prefix}:${req.ip}` });
+    return async (request) => {
+      const result = await check(request);
+      if (!result.isAllowed && result.isExceeded) throw Errors.rateLimited(Math.max(1, result.ttlInSeconds));
+    };
+  };
+
+  const { rateLimit: rl } = config;
+  const limits: RouteLimits = {
+    deviceUpload: { max: rl.uploadMax, timeWindow: rl.windowMs, allowList: lacksDeviceId },
+    devicePoll: { max: rl.pollMax, timeWindow: rl.windowMs, allowList: lacksDeviceId },
+    ipUpload: ipCeiling('ip-up', rl.ipUploadMax),
+    ipPoll: ipCeiling('ip-poll', rl.ipPollMax),
+  };
 
   app.addHook('onSend', async (request, reply) => {
     reply.header('x-request-id', request.id);
@@ -88,7 +107,7 @@ export async function buildApp(deps: AppDeps) {
 
   app.setNotFoundHandler((_request, reply) => reply.code(404).send({ code: 'not_found', message: 'Route not found' }));
 
-  const ctx = { config, service, store: deps.store, storage: deps.storage, converter: deps.converter, metrics };
+  const ctx = { config, service, store: deps.store, storage: deps.storage, converter: deps.converter, metrics, limits };
   const requireKey = apiKeyGuard(createKeyResolver(config.apiKeys));
 
   registerHealthRoutes(app, ctx);

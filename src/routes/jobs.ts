@@ -49,10 +49,12 @@ function idempotencyKey(request: FastifyRequest): string | undefined {
 /** Asynchronous API: upload returns immediately with a job id; the client polls, then downloads. */
 export function registerJobRoutes(app: FastifyInstance, ctx: RouteContext, requireKey: preHandlerAsyncHookHandler) {
   const { pollAfterMs } = ctx.config.queue;
-  const upload = { rateLimit: { max: ctx.config.rateLimit.uploadMax, timeWindow: ctx.config.rateLimit.windowMs } };
-  const poll = { rateLimit: { max: ctx.config.rateLimit.pollMax, timeWindow: ctx.config.rateLimit.windowMs } };
+  const upload = { rateLimit: ctx.limits.deviceUpload };
+  const poll = { rateLimit: ctx.limits.devicePoll };
+  const uploadGuards = [ctx.limits.ipUpload, requireKey];
+  const pollGuards = [ctx.limits.ipPoll, requireKey];
 
-  app.post('/v2/jobs', { config: upload, preHandler: requireKey }, async (request, reply) => {
+  app.post('/v2/jobs', { config: upload, preHandler: uploadGuards }, async (request, reply) => {
     const key = idempotencyKey(request);
     const file = await receiveUpload(request, ctx.storage, ctx.config.limits.maxFileBytes);
     const job = await ctx.service.submit(caller(request), file, key);
@@ -62,16 +64,16 @@ export function registerJobRoutes(app: FastifyInstance, ctx: RouteContext, requi
       .send(view(job, pollAfterMs));
   });
 
-  app.get<JobParams>('/v2/jobs/:id', { config: poll, preHandler: requireKey }, async (request) =>
+  app.get<JobParams>('/v2/jobs/:id', { config: poll, preHandler: pollGuards }, async (request) =>
     view(await ctx.service.getForCaller(jobId(request), caller(request)), pollAfterMs),
   );
 
-  app.get<JobParams>('/v2/jobs/:id/result', { config: poll, preHandler: requireKey }, async (request, reply) => {
+  app.get<JobParams>('/v2/jobs/:id/result', { config: poll, preHandler: pollGuards }, async (request, reply) => {
     const job = await ctx.service.getForCaller(jobId(request), caller(request));
     return sendPdf(reply, ctx.service, job);
   });
 
-  app.delete<JobParams>('/v2/jobs/:id', { config: poll, preHandler: requireKey }, async (request, reply) => {
+  app.delete<JobParams>('/v2/jobs/:id', { config: poll, preHandler: pollGuards }, async (request, reply) => {
     await ctx.service.delete(jobId(request), caller(request));
     return reply.code(204).send();
   });

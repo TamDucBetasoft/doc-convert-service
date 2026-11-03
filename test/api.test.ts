@@ -190,6 +190,51 @@ describe('validation and backpressure', () => {
   });
 });
 
+describe('per-IP ceiling', () => {
+  const limits = { RATE_LIMIT_UPLOAD_MAX: '2', RATE_LIMIT_IP_UPLOAD_MAX: '3', RATE_LIMIT_IP_POLL_MAX: '50' };
+
+  async function legacy(content: Buffer, remoteAddress = '127.0.0.1') {
+    const body = multipart(content, 'old.docx');
+    return t.app.inject({ method: 'POST', url: '/convert_to_pdf', payload: body.payload, headers: body.headers, remoteAddress });
+  }
+
+  it('stops a client that rotates device ids', async () => {
+    t = await createTestApp(limits);
+    const codes = [];
+    for (let i = 0; i < 4; i++) {
+      codes.push((await submit(makeDocx([`r${i}`]), 'a.docx', auth(PRINTER_KEY, `rotating-device-${i}`))).statusCode);
+    }
+    expect(codes).toEqual([202, 202, 202, 429]);
+  });
+
+  it('limits the legacy endpoint by IP only, above the per-device limit', async () => {
+    t = await createTestApp(limits);
+    const codes = [];
+    for (let i = 0; i < 4; i++) codes.push((await legacy(makeDocx([`l${i}`]))).statusCode);
+    expect(codes).toEqual([200, 200, 200, 429]);
+  });
+
+  it('counts uploads across endpoints together and leaves other IPs alone', async () => {
+    t = await createTestApp(limits);
+    expect((await submit(makeDocx(['a']), 'a.docx')).statusCode).toBe(202);
+    expect((await legacy(makeDocx(['b']))).statusCode).toBe(200);
+    expect((await legacy(makeDocx(['c']))).statusCode).toBe(200);
+    const blocked = await submit(makeDocx(['d']), 'd.docx', auth(PRINTER_KEY, 'fresh-device-0001'));
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.json().code).toBe('rate_limited');
+    expect((await legacy(makeDocx(['e']), '10.1.2.3')).statusCode).toBe(200);
+  });
+
+  it('keeps polling available after the upload ceiling is reached', async () => {
+    t = await createTestApp(limits);
+    const { jobId } = (await submit(makeDocx(['p']), 'p.docx')).json();
+    await legacy(makeDocx(['q']));
+    await legacy(makeDocx(['r']));
+    expect((await legacy(makeDocx(['s']))).statusCode).toBe(429);
+    expect((await t.app.inject({ method: 'GET', url: `/v2/jobs/${jobId}`, headers: auth() })).statusCode).toBe(200);
+  });
+});
+
 describe('synchronous endpoints', () => {
   it('keeps the legacy contract: no key, field "file", PDF body', async () => {
     t = await createTestApp();

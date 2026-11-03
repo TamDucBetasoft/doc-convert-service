@@ -47,10 +47,14 @@ export function apiKeyGuard(resolve: (key: string | undefined) => string | undef
   };
 }
 
-/** Rate-limit bucket: one per device when the app sends an id, otherwise per client IP. */
-export function rateLimitKey(request: FastifyRequest): string {
+/** Per-device rate-limit bucket; requests without a device id are limited by the IP ceiling alone. */
+export function deviceRateLimitKey(request: FastifyRequest): string {
   const raw = request.headers['x-api-key'];
   const key = Array.isArray(raw) ? raw[0] : raw;
   const keyPart = key ? digest(key).toString('hex').slice(0, 12) : 'anon';
-  return `${keyPart}:${readDeviceId(request) ?? request.ip}`;
+  return `dev:${keyPart}:${readDeviceId(request) ?? 'none'}`;
+}
+
+export function lacksDeviceId(request: FastifyRequest): boolean {
+  return readDeviceId(request) === undefined;
 }
