@@ -2,6 +2,7 @@
 
 Dịch vụ chuyển tài liệu Office sang PDF cho app **Smart Printer** (và các app khác của công ty, ví dụ PDF Reader).
 Thay thế backend cũ `http://139.180.140.223:8080/convert_to_pdf`.
+Bàn giao vận hành (trạng thái, việc cần quyết, kế hoạch chuyển đổi): [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 - **Định dạng:** doc, docx, xls, xlsx, ppt, pptx, odt, ods, odp, rtf
 - **Engine:** [Gotenberg](https://gotenberg.dev) (LibreOffice chạy headless), bản `-libreoffice` không kèm Chromium
