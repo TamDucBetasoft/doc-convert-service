@@ -1,4 +1,4 @@
-import { strToU8, zipSync, type Zippable } from 'fflate';
+import { strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 
 const xml = (body: string) => strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${body}`);
 const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -75,6 +75,16 @@ export function makeXlsx(sheets: Record<string, string[][]>): Buffer {
     files[`xl/worksheets/sheet${i + 1}.xml`] = xml(
       `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows}</sheetData></worksheet>`,
     );
+  });
+  return Buffer.from(zipSync(files));
+}
+
+/** .xlsx with caller-provided worksheet XML, one entry per sheet, for testing print preparation. */
+export function makeXlsxFromSheets(sheetXmls: string[]): Buffer {
+  const base = makeXlsx(Object.fromEntries(sheetXmls.map((_, i) => [`S${i + 1}`, [['x']]])));
+  const files = unzipSync(base) as Zippable;
+  sheetXmls.forEach((xmlBody, i) => {
+    files[`xl/worksheets/sheet${i + 1}.xml`] = xml(xmlBody);
   });
   return Buffer.from(zipSync(files));
 }

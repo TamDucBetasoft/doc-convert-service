@@ -10,6 +10,17 @@ import type { Job, JobStore } from './jobStore.js';
 import type { Metrics } from './metrics.js';
 import { JobQueue } from './queue.js';
 import type { FileStorage } from './storage.js';
+import { prepareXlsx } from './xlsxPrep.js';
+
+/**
+ * Bump whenever the conversion pipeline changes what a given input produces, so results cached by an older
+ * pipeline are not served for identical uploads.
+ */
+const CONVERSION_REVISION = 2;
+
+function resultKey(sha256: string): string {
+  return `${sha256}-r${CONVERSION_REVISION}`;
+}
 
 export type Upload = {
   tmpPath: string;
@@ -93,13 +104,14 @@ export class JobService {
         expiresAt: new Date(now.getTime() + this.deps.config.resultTtlSeconds * 1000).toISOString(),
       };
 
-      const cached = this.deps.config.cacheEnabled ? await store.getCachedResult(upload.sha256) : null;
-      const resultPath = storage.resultPath(upload.sha256);
+      const key = resultKey(upload.sha256);
+      const cached = this.deps.config.cacheEnabled ? await store.getCachedResult(key) : null;
+      const resultPath = storage.resultPath(key);
       if (cached && (await storage.exists(resultPath))) {
         await storage.remove(upload.tmpPath);
         // Refresh mtime so the disk sweeper keeps the shared result as long as this new job needs it.
         await storage.touch(resultPath);
-        await store.setCachedResult(upload.sha256, cached);
+        await store.setCachedResult(key, cached);
         const done: Job = { ...job, status: 'done', pageCount: cached.pageCount, resultBytes: cached.resultBytes };
         await store.save(done);
         this.metrics.cacheHits.inc({ app: caller.appId, format });
@@ -147,7 +159,7 @@ export class JobService {
       const code = job.error?.code ?? 'conversion_failed';
       throw new AppError(code === 'conversion_timeout' ? 504 : 422, code, job.error?.message ?? 'Conversion failed');
     }
-    const path = this.deps.storage.resultPath(job.sha256);
+    const path = this.deps.storage.resultPath(resultKey(job.sha256));
     if (!(await this.deps.storage.exists(path))) throw Errors.resultExpired();
     return path;
   }
@@ -157,8 +169,8 @@ export class JobService {
     const { store, storage } = this.deps;
     await store.delete(id);
     if (job.status === 'done') {
-      await store.deleteCachedResult(job.sha256);
-      await storage.remove(storage.resultPath(job.sha256));
+      await store.deleteCachedResult(resultKey(job.sha256));
+      await storage.remove(storage.resultPath(resultKey(job.sha256)));
     }
   }
 
@@ -206,17 +218,20 @@ export class JobService {
     if (!job || job.status !== 'queued') return;
 
     const input = storage.incomingPath(id);
+    const prepared = storage.tmpPath();
     const tmpOut = storage.tmpPath();
-    const output = storage.resultPath(job.sha256);
+    const key = resultKey(job.sha256);
+    const output = storage.resultPath(key);
     const started = performance.now();
     await store.save({ ...job, status: 'processing', updatedAt: new Date().toISOString() });
 
     try {
-      await converter.convert(input, `document.${job.format}`, tmpOut);
+      const source = await this.prepare(job, input, prepared);
+      await converter.convert(source, `document.${job.format}`, tmpOut);
       const pageCount = await countPages(tmpOut);
       await rename(tmpOut, output);
       const resultBytes = await storage.size(output);
-      await store.setCachedResult(job.sha256, { pageCount, resultBytes });
+      await store.setCachedResult(key, { pageCount, resultBytes });
       await store.save({ ...job, status: 'done', pageCount, resultBytes, updatedAt: new Date().toISOString() });
       this.metrics.conversions.inc({ app: job.appId, format: job.format, result: 'done' });
       log.info({ jobId: id, format: job.format, sizeBytes: job.sizeBytes, pageCount }, 'conversion done');
@@ -230,6 +245,22 @@ export class JobService {
     } finally {
       this.metrics.duration.observe({ format: job.format }, (performance.now() - started) / 1000);
       await storage.remove(input);
+      await storage.remove(prepared);
+    }
+  }
+
+  /** Returns the file to send to the engine: a print-ready rewrite when one applies, otherwise the upload. */
+  private async prepare(job: Job, input: string, prepared: string): Promise<string> {
+    const { config, log } = this.deps;
+    if (job.format !== 'xlsx' || !config.xlsxPrintFixes) return input;
+    try {
+      const result = await prepareXlsx(input, prepared, config.xlsxPrepMaxBytes);
+      if (!result.changed) return input;
+      log.info({ jobId: job.id, sheets: result.sheets }, 'xlsx prepared for printing');
+      return prepared;
+    } catch (err) {
+      log.warn({ jobId: job.id, err }, 'xlsx preparation skipped');
+      return input;
     }
   }
 }

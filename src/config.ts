@@ -31,6 +31,8 @@ const envSchema = z.object({
   SYNC_WAIT_MS: int(90_000),
   RESULT_TTL_SECONDS: int(3_600),
   CACHE_ENABLED: bool.default(true),
+  XLSX_PRINT_FIXES: bool.default(true),
+  XLSX_PREP_MAX_BYTES: int(64 * 1024 * 1024),
   POLL_AFTER_MS: int(1_000),
   RETRY_AFTER_SECONDS: int(10),
 
@@ -70,6 +72,9 @@ export type Config = {
   resultTtlSeconds: number;
   /** Disable only for load tests, so identical uploads measure real conversion cost. */
   cacheEnabled: boolean;
+  /** Rewrite .xlsx before conversion: fit sheets to page width, print cached formula values. */
+  xlsxPrintFixes: boolean;
+  xlsxPrepMaxBytes: number;
   rateLimit: {
     uploadMax: number;
     pollMax: number;
@@ -130,6 +135,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     resultTtlSeconds: Math.max(60, e.RESULT_TTL_SECONDS),
     cacheEnabled: e.CACHE_ENABLED,
+    xlsxPrintFixes: e.XLSX_PRINT_FIXES,
+    xlsxPrepMaxBytes: e.XLSX_PREP_MAX_BYTES,
     rateLimit: {
       uploadMax: e.RATE_LIMIT_UPLOAD_MAX,
       pollMax: e.RATE_LIMIT_POLL_MAX,

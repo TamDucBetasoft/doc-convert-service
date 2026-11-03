@@ -154,6 +154,21 @@ Xem đầy đủ trong [`.env.example`](.env.example). Các con số mặc đị
 | `SYNC_WAIT_MS` | 90 s | Endpoint đồng bộ chờ tối đa |
 | `RESULT_TTL_SECONDS` | 1 h | Thời gian giữ job và PDF |
 | `CACHE_ENABLED` | `true` | Tắt khi chạy load test |
+| `XLSX_PRINT_FIXES` | `true` | Chuẩn bị file `.xlsx` trước khi in (xem mục "Excel" bên dưới). Tắt để quay về convert nguyên bản |
+| `XLSX_PREP_MAX_BYTES` | 64 MB | File `.xlsx` giải nén lớn hơn mức này thì bỏ qua bước chuẩn bị, convert nguyên bản |
+
+### Excel: chuẩn bị trước khi in (`src/xlsxPrep.ts`)
+
+LibreOffice in file Excel khác cách người dùng thấy trong Excel / Google Sheets ở hai chỗ, nên gateway sửa file `.xlsx` trước khi gửi Gotenberg:
+
+| Vấn đề (đo trên file thật) | Cách xử lý | Không làm khi |
+|---|---|---|
+| Sheet không đặt vùng/tỉ lệ in → cột bị cắt sang trang khác (bảng 10 cột: **62 → 8 trang**) | Đặt "vừa chiều ngang trang" (`fitToWidth=1`, `fitToHeight=0`); sheet rộng hơn khổ A4 dọc thì chuyển **khổ ngang** | Sheet đã có `fitToPage` hoặc `scale` riêng của người tạo |
+| File từ Google Sheets có hàm LibreOffice không có (`IMAGE`, `GOOGLEFINANCE`…) → in ra `#NAME?` | In **giá trị đã lưu trong file** (đúng cái người dùng thấy) thay vì tính lại công thức | Bất kỳ công thức nào trong sheet thiếu giá trị lưu sẵn (file sinh bằng openpyxl…) → giữ nguyên mọi công thức của sheet đó |
+
+Đánh đổi đã biết: sheet cực rộng (ví dụ bảng ảnh trải ngang hàng chục cột) bị thu nhỏ cho vừa 1 trang ngang nên chữ/ảnh rất nhỏ; trước đây sheet đó bị cắt thành nhiều trang. Hàm thay đổi theo thời gian (`TODAY()`, `NOW()`) in ra giá trị lúc lưu file. Chỉ áp dụng `.xlsx` (`.xls` đời cũ là định dạng nhị phân, không sửa).
+
+Mỗi lần đổi logic chuẩn bị/convert khiến cùng một file ra PDF khác: tăng `CONVERSION_REVISION` trong `src/jobService.ts` để cache không trả PDF cũ.
 | `RATE_LIMIT_UPLOAD_MAX` / `RATE_LIMIT_POLL_MAX` / `RATE_LIMIT_WINDOW_MS` | 30 / 240 / 60 s | Giới hạn lượt theo thiết bị/IP |
 
 ---
