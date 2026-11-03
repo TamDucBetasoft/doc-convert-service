@@ -6,6 +6,10 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    ignore:
+      # Must track the Node version the service runs (Dockerfile, CI); bumped together by hand.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       # One PR per week for routine bumps; major versions still arrive one by one so they can be reviewed.
       npm-minor-patch:
