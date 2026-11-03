@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      gotenberg:
+        image: gotenberg/gotenberg:8.39.0-libreoffice
+        ports:
+          - 3000:3000
+        options: >-
+          --health-cmd "curl -fsS http://localhost:3000/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Test (unit, API and real Gotenberg)
+        run: npm test
+        env:
+          GOTENBERG_URL: http://localhost:3000
+      - run: npm run build
+
+  stack:
+    name: Docker stack smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Generate sample documents
+        run: npm ci && npm run samples
+      - name: Write .env with throwaway keys
+        run: |
+          KEY="$(openssl rand -hex 24)"
+          echo "::add-mask::$KEY"
+          { echo "API_KEYS=printer:$KEY"; grep -v '^API_KEYS=' .env.example; } > .env
+          echo "API_KEY=$KEY" >> "$GITHUB_ENV"
+      - name: Start stack
+        run: docker compose up -d --build --wait --wait-timeout 180
+      - name: Readiness
+        run: curl -fsS localhost:8080/readyz
+      - name: Convert via /v2/convert
+        run: |
+          curl -fsS -H "x-api-key: $API_KEY" -F file=@samples/generated/vi-two-sheets.xlsx \
+            localhost:8080/v2/convert -o out.pdf
+          head -c 5 out.pdf | grep -q '%PDF-'
+      - name: Convert via legacy /convert_to_pdf
+        run: |
+          curl -fsS -F file=@samples/generated/vi-multiscript.docx localhost:8080/convert_to_pdf -o legacy.pdf
+          head -c 5 legacy.pdf | grep -q '%PDF-'
+      - name: Reject unauthenticated /v2
+        run: test "$(curl -s -o /dev/null -w '%{http_code}' -F file=@samples/generated/plain.rtf localhost:8080/v2/jobs)" = 401
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v

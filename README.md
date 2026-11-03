@@ -73,6 +73,30 @@ rồi đặt `GOTENBERG_URL=http://localhost:3000 REDIS_URL=redis://localhost:63
 | `src/routes/` | `/convert_to_pdf`, `/v2/convert`, `/v2/jobs*`, `/healthz`, `/readyz`, `/metrics` |
 | `openapi.yaml` | Đặc tả API đầy đủ |
 | `loadtest/convert.js` | Kịch bản k6 |
+| `.github/` | CI, phát hành image, Dependabot |
+
+## CI, phát hành và cập nhật thư viện
+
+| File | Chạy khi | Làm gì |
+|---|---|---|
+| `.github/workflows/ci.yml` | Push lên `main`, mở/cập nhật PR | `typecheck` + toàn bộ test, gồm test với Gotenberg thật; sau đó dựng cả stack Docker và gọi thử `/v2/convert`, `/convert_to_pdf`, kiểm `401` |
+| `.github/workflows/release.yml` | Push tag `vX.Y.Z` | Chạy test, rồi build image amd64 + arm64 và đẩy lên `ghcr.io/<owner>/<repo>:X.Y.Z`, `:X.Y`, `:latest` |
+| `.github/dependabot.yml` | Thứ Hai hằng tuần | Mở PR nâng npm (gộp minor/patch), Node base image, Gotenberg/Redis trong compose, GitHub Actions |
+
+Phát hành một bản:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Server khi đó chỉ cần `docker pull ghcr.io/<owner>/<repo>:0.1.0` thay cho `build: .` trong compose.
+Image trên ghcr.io mặc định là private, nên server cần `docker login ghcr.io` bằng token có quyền `read:packages`.
+
+Thiết lập cần bật tay trong GitHub (Settings, quyền admin):
+- **Branches → Branch protection** cho `main`: bắt buộc qua PR, bắt buộc check `Typecheck and test` và `Docker stack smoke test` xanh.
+- **Code security**: bật *Dependabot alerts* và *Dependabot security updates*.
+- **Collaborators**: thêm CTO, hoặc chuyển repo sang organization của công ty.
+- **Actions → General**: giữ quyền mặc định của `GITHUB_TOKEN` là read; workflow release tự xin `packages: write`.
 
 ---
 
