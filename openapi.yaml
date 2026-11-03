@@ -1,0 +1,235 @@
+openapi: 3.1.0
+info:
+  title: Print Convert Service
+  version: 0.1.0
+  description: |
+    Converts Office documents (doc, docx, xls, xlsx, ppt, pptx, odt, ods, odp, rtf) to PDF.
+
+    Clients branch on the error `code`, never on `message`. Every response carries `x-request-id`;
+    include it when reporting a problem.
+
+    Recommended client flow: `POST /v2/jobs` → poll `GET /v2/jobs/{id}` every `pollAfterMs`
+    (back off up to ~3 s) → `GET /v2/jobs/{id}/result` → optionally `DELETE /v2/jobs/{id}`.
+servers:
+  - url: http://localhost:8080
+security:
+  - ApiKey: []
+
+paths:
+  /v2/jobs:
+    post:
+      summary: Submit a document for asynchronous conversion
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Retrying with the same key returns the original job instead of converting twice.
+          schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '202':
+          description: Accepted and queued
+          headers:
+            Location: { schema: { type: string }, description: URL of the job }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Job' } }
+        '200':
+          description: Identical content was converted recently; the job is already done
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Job' } }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '415': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Retryable' }
+        '503': { $ref: '#/components/responses/Retryable' }
+
+  /v2/jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      summary: Job status
+      responses:
+        '200':
+          description: Current state
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Job' } }
+        '404': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Retryable' }
+    delete:
+      summary: Delete the job and its result now instead of waiting for expiry
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /v2/jobs/{id}/result:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      summary: Download the PDF of a finished job
+      responses:
+        '200': { $ref: '#/components/responses/Pdf' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '504': { $ref: '#/components/responses/Error' }
+
+  /v2/convert:
+    post:
+      summary: Synchronous conversion (waits up to SYNC_WAIT_MS)
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { $ref: '#/components/responses/Pdf' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '415': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Retryable' }
+        '503': { $ref: '#/components/responses/Retryable' }
+        '504': { $ref: '#/components/responses/Error' }
+
+  /convert_to_pdf:
+    post:
+      summary: Legacy contract for app builds released before /v2 (no API key)
+      deprecated: true
+      security: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { $ref: '#/components/responses/Pdf' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /healthz:
+    get:
+      summary: Liveness
+      security: []
+      responses:
+        '200': { description: Process is running }
+  /readyz:
+    get:
+      summary: Readiness (Redis and Gotenberg reachable)
+      security: []
+      responses:
+        '200': { description: Ready }
+        '503': { description: A dependency is down }
+  /metrics:
+    get:
+      summary: Prometheus metrics (Bearer METRICS_TOKEN when configured)
+      security: []
+      responses:
+        '200': { description: Prometheus text format }
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+
+  parameters:
+    JobId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DeviceId:
+      name: X-Device-Id
+      in: header
+      required: false
+      description: |
+        Stable per-install id (8-128 chars of [A-Za-z0-9._-]). Jobs created with it are visible only to the
+        same id, and rate limits apply per device instead of per IP.
+      schema: { type: string }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - bad_request
+            - unauthorized
+            - file_missing
+            - file_too_large
+            - unsupported_format
+            - archive_rejected
+            - conversion_failed
+            - conversion_timeout
+            - engine_unavailable
+            - queue_full
+            - rate_limited
+            - job_not_found
+            - job_not_ready
+            - result_expired
+            - interrupted
+            - not_found
+            - internal_error
+        message: { type: string, description: Human-readable, English, not for display }
+    Job:
+      type: object
+      required: [jobId, status, format, sizeBytes, createdAt, updatedAt, expiresAt]
+      properties:
+        jobId: { type: string, format: uuid }
+        status: { type: string, enum: [queued, processing, done, failed] }
+        format: { type: string, enum: [doc, docx, xls, xlsx, ppt, pptx, odt, ods, odp, rtf] }
+        sizeBytes: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        pollAfterMs: { type: integer, description: Present while queued or processing }
+        pageCount: { type: [integer, 'null'], description: Present when done }
+        resultBytes: { type: [integer, 'null'], description: Present when done }
+        error: { $ref: '#/components/schemas/Error' }
+
+  responses:
+    Pdf:
+      description: The converted PDF
+      headers:
+        X-Job-Id: { schema: { type: string } }
+        X-Page-Count: { schema: { type: string } }
+      content:
+        application/pdf:
+          schema: { type: string, format: binary }
+    Error:
+      description: Error
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    Retryable:
+      description: Retry after the number of seconds in Retry-After
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
