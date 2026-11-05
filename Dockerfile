@@ -1,4 +1,6 @@
-FROM node:22-alpine AS build
+# Build on the runner's own architecture: under QEMU `npm ci` dies with an illegal instruction and hangs the arm64 build.
+# Safe to copy node_modules across architectures only while production dependencies have no native modules.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
