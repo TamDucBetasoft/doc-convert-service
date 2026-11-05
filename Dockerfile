@@ -1,6 +1,6 @@
 # Build on the runner's own architecture: under QEMU `npm ci` dies with an illegal instruction and hangs the arm64 build.
 # Safe to copy node_modules across architectures only while production dependencies have no native modules.
-FROM --platform=$BUILDPLATFORM node:22-alpine AS build
+FROM --platform=$BUILDPLATFORM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -8,7 +8,7 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 ENV NODE_ENV=production \
     DATA_DIR=/data \
     PORT=8080
