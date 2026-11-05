@@ -74,12 +74,14 @@ Chi tiết kỹ thuật: [`README.md`](../README.md) · hợp đồng API: [`ope
 | Rate limit với Redis thật | Lần upload thứ 31 nhận 429 kèm `Retry-After`; bộ đếm vẫn còn sau khi restart gateway |
 | Kill gateway khi đang có 16 job | Sau khi bật lại, cả 16 job đều xong |
 | Kill Gotenberg khi đang có job | `/readyz` báo 503, job lỗi `engine_unavailable`, cả `/v2/convert` và `/convert_to_pdf` trả 503; bật lại là chạy tiếp |
-| Redis từ chối ghi hoặc tắt hẳn | Upload trả 500 có `code`, phản hồi dưới 15 giây, `/healthz` vẫn sống; Redis về là chạy tiếp |
+| Redis từ chối ghi hoặc tắt hẳn | Upload trả 500 có `code` và `/readyz` trả 503, đều dưới 5 giây; `/healthz` vẫn sống; Redis về là chạy tiếp |
 | 3 Gotenberg, `WORKER_CONCURRENCY=6` | 24 file: 24,6 s còn 12,2 s; tải chia 9/8/7 |
 | Kill 1 trong 3 Gotenberg | 12 file đều xong, không job nào lỗi |
 | `.doc`, `.xls` có mật khẩu | Trả 422 `conversion_failed` sau khoảng 1 s, không treo |
 
-Lỗi tìm được và đã sửa: khi engine sập, endpoint kết quả và cả `/convert_to_pdf` trả 422 khiến app báo "file hỏng". Giờ trả 503 kèm `Retry-After`.
+Lỗi tìm được và đã sửa:
+- Khi engine sập, endpoint kết quả và cả `/convert_to_pdf` trả 422 khiến app báo "file hỏng". Giờ trả 503 kèm `Retry-After`.
+- Khi Redis tắt, lệnh chờ qua các lần kết nối lại nên upload treo 26,7 s và `/readyz` treo 15,5 s (đo trên GitHub runner, nơi tên `redis` phân giải lỗi rất chậm). Giờ gateway từ chối ngay.
 
 Lỗi đã biết, chưa sửa:
 - **Job kẹt khi Redis đầy:** job đang chạy không ghi được trạng thái nên kẹt ở `queued` hoặc `processing` cho đến khi hết TTL (đo được 15/18 job). Job còn file gốc được chạy lại khi restart gateway. App sẽ dừng theo giới hạn poll của mình.

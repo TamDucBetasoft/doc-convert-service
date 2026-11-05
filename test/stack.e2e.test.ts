@@ -236,8 +236,14 @@ describe.skipIf(!BASE)('Docker stack', { timeout: 180_000 }, () => {
       const started = Date.now();
       const res = await upload(uniqueDoc(), device);
       expect(res.status).toBeGreaterThanOrEqual(500);
-      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(Date.now() - started).toBeLessThan(5_000);
       await res.body?.cancel();
+
+      const readinessStarted = Date.now();
+      const readiness = await fetch(`${BASE}/readyz`);
+      expect(readiness.status).toBe(503);
+      expect(Date.now() - readinessStarted).toBeLessThan(5_000);
+      await readiness.body?.cancel();
     } finally {
       compose('start redis');
       await waitForReadiness(true);
