@@ -97,7 +97,7 @@ Chưa có bằng chứng:
 | Đầy ổ đĩa | Chưa thử |
 | Nhiều gateway | Chưa thử; cần đổi code (mục 8) |
 | `.ppt` có mật khẩu | Chưa thử: LibreOffice không mã hoá được `.ppt` nên chưa có file mẫu |
-| Phát hành image | Repo chưa có tag, `release.yml` chưa chạy lần nào, chưa có image trên ghcr.io |
+| Phát hành image | Tag `v0.1.0` không có image: `npm ci` của arm64 kẹt khi chạy qua QEMU và job bị huỷ sau 30 phút. Dockerfile đã sửa, chờ bản phát hành kế tiếp để xác nhận image trên ghcr.io |
 | App với `/v2` | App chưa tích hợp, các lần thử trên máy thật ở mục 2 đi qua endpoint cũ |
 
 ## 8. Vận hành
@@ -117,6 +117,8 @@ docker compose logs -f gateway
 Gateway mặc định chỉ mở trên `127.0.0.1:8080` để chỉ Nginx cùng máy gọi được, vì Docker publish cổng đi vòng qua `ufw`. Nếu proxy ở máy khác thì đặt `GATEWAY_PORT` và chặn bằng firewall của nhà cung cấp cloud.
 
 Image: build từ source như trên, hoặc push tag `vX.Y.Z` rồi dùng image trên ghcr.io. Nên dùng image theo version để rollback được.
+
+Stage build chạy trên kiến trúc của máy build rồi chép `node_modules` sang image đích, nên chỉ đúng khi dependency production không có module native. Nếu thêm dependency native, phải đổi cách build; job `Build image for amd64 and arm64` trong CI chỉ kiểm tra build được, không kiểm tra module chạy đúng.
 
 ### Scale
 
