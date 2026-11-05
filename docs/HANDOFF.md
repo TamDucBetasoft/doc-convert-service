@@ -63,7 +63,7 @@ Chi tiết kỹ thuật: [`README.md`](../README.md) · hợp đồng API: [`ope
 
 ## 7. Kết quả kiểm thử (cập nhật 2026-11-05)
 
-57 test đều đạt trên stack Docker dựng mới, gồm test với Gotenberg thật và `test/stack.e2e.test.ts`. Môi trường đo là máy dev (colima 4 vCPU, 6 GB), không phải server thật, nên các con số chỉ để tham khảo. Bước e2e mới trong CI chưa chạy trên GitHub cho đến khi push.
+57 test đều đạt trên stack Docker dựng mới, gồm test với Gotenberg thật và `test/stack.e2e.test.ts`. Môi trường đo là máy dev (colima 4 vCPU, 6 GB), không phải server thật, nên các con số chỉ để tham khảo. Các test này cũng chạy và đạt trong CI trên GitHub.
 
 Đã kiểm chứng:
 
@@ -97,7 +97,7 @@ Chưa có bằng chứng:
 | Đầy ổ đĩa | Chưa thử |
 | Nhiều gateway | Chưa thử; cần đổi code (mục 8) |
 | `.ppt` có mật khẩu | Chưa thử: LibreOffice không mã hoá được `.ppt` nên chưa có file mẫu |
-| Phát hành image | Tag `v0.1.0` không có image: `npm ci` của arm64 kẹt khi chạy qua QEMU và job bị huỷ sau 30 phút. Dockerfile đã sửa, chờ bản phát hành kế tiếp để xác nhận image trên ghcr.io |
+| Chạy thử image đã phát hành | `ghcr.io/tamducbetasoft/doc-convert-service:0.1.1` đã có trên ghcr.io nhưng chưa được pull về chạy. Bản arm64 chưa chạy trên máy ARM thật |
 | App với `/v2` | App chưa tích hợp, các lần thử trên máy thật ở mục 2 đi qua endpoint cũ |
 
 ## 8. Vận hành
@@ -116,7 +116,7 @@ docker compose logs -f gateway
 
 Gateway mặc định chỉ mở trên `127.0.0.1:8080` để chỉ Nginx cùng máy gọi được, vì Docker publish cổng đi vòng qua `ufw`. Nếu proxy ở máy khác thì đặt `GATEWAY_PORT` và chặn bằng firewall của nhà cung cấp cloud.
 
-Image: build từ source như trên, hoặc push tag `vX.Y.Z` rồi dùng image trên ghcr.io. Nên dùng image theo version để rollback được.
+Image: build từ source như trên, hoặc dùng image đã phát hành `ghcr.io/tamducbetasoft/doc-convert-service:0.1.1` (amd64 và arm64). Tag `v0.1.0` không có image. Image đang private, nên cần quyền truy cập repo và `docker login ghcr.io` bằng token có `read:packages`; trong `docker-compose.yml`, thay `build: .` của service `gateway` bằng `image:` này. Nên dùng image theo version để rollback được; bản mới được tạo khi push tag `vX.Y.Z`.
 
 Stage build chạy trên kiến trúc của máy build rồi chép `node_modules` sang image đích, nên chỉ đúng khi dependency production không có module native. Nếu thêm dependency native, phải đổi cách build; job `Build image for amd64 and arm64` trong CI chỉ kiểm tra build được, không kiểm tra module chạy đúng.
 
@@ -157,6 +157,8 @@ Trước bước 3 phải sửa `recover()` trong `src/jobService.ts`: hàm này
 >
 > **Cần chuẩn bị:** server ≥ 2 vCPU, 4 GB RAM có Docker; một domain HTTPS, ví dụ `convert.<congty>.com`.
 >
+> **Image:** `ghcr.io/tamducbetasoft/doc-convert-service:0.1.1` (amd64 và arm64). Repo và image đang private, nên anh cần quyền truy cập repo và `docker login ghcr.io` bằng token có `read:packages`. Trong `docker-compose.yml`, thay `build: .` của service `gateway` bằng `image:` này. Nếu chưa tiện, có thể build từ source bằng `docker compose up -d --build`.
+>
 > **Cần anh quyết:**
 > 1. Deploy ở đâu.
 > 2. Ai nhận cảnh báo khi server sập.
@@ -170,6 +172,8 @@ Trước bước 3 phải sửa `recover()` trong `src/jobService.ts`: hàm này
 > - Đặt `TRUST_PROXY` đúng địa chỉ proxy.
 > - Bật xoay vòng log Docker.
 > - Uptime check vào `/readyz`, chặn `/metrics` từ ngoài.
+>
+> **Sau khi cài, xin anh chạy thử:** `curl https://<domain>/readyz` và convert một file qua `/convert_to_pdf`.
 >
 > **Sau khi xong, gửi lại em:** domain và API key cho app printer (qua kênh an toàn), để em đo tải và tích hợp.
 >
