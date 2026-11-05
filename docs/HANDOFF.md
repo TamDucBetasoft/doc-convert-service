@@ -78,6 +78,8 @@ Chi tiết kỹ thuật: [`README.md`](../README.md) · hợp đồng API: [`ope
 | 3 Gotenberg, `WORKER_CONCURRENCY=6` | 24 file: 24,6 s còn 12,2 s; tải chia 9/8/7 |
 | Kill 1 trong 3 Gotenberg | 12 file đều xong, không job nào lỗi |
 | `.doc`, `.xls` có mật khẩu | Trả 422 `conversion_failed` sau khoảng 1 s, không treo |
+| Image `0.1.1` bản arm64, pull từ ghcr.io (2026-11-05) | Cả stack healthy; `.docx`, `.xlsx` qua `/v2/convert` và `/convert_to_pdf` đều ra PDF; test e2e đạt 9/9 |
+| Gateway khởi động khi Redis tắt | Không crash, không restart nhưng chưa mở cổng, nên `/healthz` và `/readyz` đều không kết nối được (theo dõi 25 s). Bật Redis thì khoảng 6 s sau gateway sẵn sàng và convert được |
 
 Lỗi tìm được và đã sửa:
 - Khi engine sập, endpoint kết quả và cả `/convert_to_pdf` trả 422 khiến app báo "file hỏng". Giờ trả 503 kèm `Retry-After`.
@@ -97,7 +99,7 @@ Chưa có bằng chứng:
 | Đầy ổ đĩa | Chưa thử |
 | Nhiều gateway | Chưa thử; cần đổi code (mục 8) |
 | `.ppt` có mật khẩu | Chưa thử: LibreOffice không mã hoá được `.ppt` nên chưa có file mẫu |
-| Chạy thử image đã phát hành | `ghcr.io/tamducbetasoft/doc-convert-service:0.1.1` đã có trên ghcr.io nhưng chưa được pull về chạy. Bản arm64 chưa chạy trên máy ARM thật |
+| Image `0.1.1` bản amd64 | Mới khởi động được Node qua giả lập trên máy ARM, chưa chạy stack và chưa convert. Stack trong CI chạy trên amd64 nhưng build từ source, không dùng image này |
 | App với `/v2` | App chưa tích hợp, các lần thử trên máy thật ở mục 2 đi qua endpoint cũ |
 
 ## 8. Vận hành
@@ -143,6 +145,7 @@ Trước bước 3 phải sửa `recover()` trong `src/jobService.ts`: hàm này
 | Đầy ổ đĩa | Volume `convert-data`, log Docker | Giảm `RESULT_TTL_SECONDS`, bật xoay vòng log |
 | Redis đầy | Giới hạn 256 MB, `noeviction` nên không tự xoá key; upload trả 500 | Tăng `--maxmemory`, rồi restart gateway để chạy lại job bị kẹt |
 | Redis tắt | `/readyz` báo `redis: false`; upload trả 500 | Bật lại Redis, gateway tự nối lại |
+| Gateway không trả lời, kể cả `/healthz`, log lặp `redis: ...` | Gateway khởi động khi Redis chưa lên nên chưa mở cổng; container vẫn `running` | Bật lại Redis, gateway tự mở cổng, không cần restart |
 | Lộ API key | Log theo app | Thêm key mới, ra bản app mới, rồi mới thu hồi key cũ; thu hồi sớm làm hỏng bản app đang dùng key đó |
 
 ### Việc định kỳ
@@ -157,7 +160,7 @@ Trước bước 3 phải sửa `recover()` trong `src/jobService.ts`: hàm này
 >
 > **Cần chuẩn bị:** server ≥ 2 vCPU, 4 GB RAM có Docker; một domain HTTPS, ví dụ `convert.<congty>.com`.
 >
-> **Image:** `ghcr.io/tamducbetasoft/doc-convert-service:0.1.1` (amd64 và arm64). Repo và image đang private, nên anh cần quyền truy cập repo và `docker login ghcr.io` bằng token có `read:packages`. Trong `docker-compose.yml`, thay `build: .` của service `gateway` bằng `image:` này. Nếu chưa tiện, có thể build từ source bằng `docker compose up -d --build`.
+> **Image:** `ghcr.io/tamducbetasoft/doc-convert-service:0.1.1` (amd64 và arm64). Repo và image đang private, nên anh cần quyền truy cập repo và `docker login ghcr.io` bằng token có `read:packages`. Trong `docker-compose.yml`, thay `build: .` của service `gateway` bằng `image:` này. Nếu chưa tiện, có thể build từ source bằng `docker compose up -d --build`. Em đã chạy đủ stack với bản arm64; bản amd64 chưa convert lần nào, nên nếu server là amd64 thì bước chạy thử bên dưới là lần kiểm tra đầu tiên của bản này.
 >
 > **Cần anh quyết:**
 > 1. Deploy ở đâu.
