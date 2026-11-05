@@ -16,7 +16,11 @@ async function main() {
     console.warn('API_KEYS is empty: every /v2 request will be rejected with 401');
   }
 
-  const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: 3, enableOfflineQueue: true });
+  // No offline queue: commands would otherwise wait out reconnects, and when the hostname stops resolving each
+  // attempt can take seconds (measured 26 s per upload and 15 s per /readyz during a Redis outage on GitHub runners).
+  const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: 3, enableOfflineQueue: false });
+  redis.on('error', (err: Error) => console.error(`redis: ${err.message}`));
+  await new Promise<void>((resolve) => redis.once('ready', () => resolve()));
   const storage = new FileStorage(config.dataDir);
   await storage.init();
 

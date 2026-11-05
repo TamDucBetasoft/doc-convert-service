@@ -75,6 +75,12 @@ jobs:
           head -c 5 legacy.pdf | grep -q '%PDF-'
       - name: Reject unauthenticated /v2
         run: test "$(curl -s -o /dev/null -w '%{http_code}' -F file=@samples/generated/plain.rtf localhost:8080/v2/jobs)" = 401
+      - name: End-to-end against the stack (async jobs, Redis, failure scenarios)
+        run: npm test -- test/stack.e2e.test.ts
+        env:
+          STACK_URL: http://localhost:8080
+          STACK_API_KEY: ${{ env.API_KEY }}
+          STACK_COMPOSE: docker compose
       - name: Logs on failure
         if: failure()
         run: docker compose logs --no-color

@@ -10,7 +10,8 @@ services:
       REDIS_URL: redis://redis:6379
       DATA_DIR: /data
     ports:
-      - "${GATEWAY_PORT:-8080}:8080"
+      # Loopback by default: Docker publishes ports around ufw, so only the reverse proxy should reach the gateway.
+      - "${GATEWAY_PORT:-127.0.0.1:8080}:8080"
     volumes:
       - convert-data:/data
     read_only: true

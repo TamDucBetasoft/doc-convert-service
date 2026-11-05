@@ -123,6 +123,18 @@ describe('async jobs', () => {
     expect(res.statusCode).toBe(422);
   });
 
+  it('answers 503 with Retry-After on the result of a job the engine could not take', async () => {
+    t = await createTestApp();
+    t.converter.failWith = Errors.engineUnavailable(5);
+    const { jobId } = (await submit(makeXlsx({ Sheet1: [['b']] }), 'b.xlsx')).json();
+    await pollUntilSettled(jobId);
+
+    const res = await t.app.inject({ method: 'GET', url: `/v2/jobs/${jobId}/result`, headers: auth() });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().code).toBe('engine_unavailable');
+    expect(res.headers['retry-after']).toBeTruthy();
+  });
+
   it('deletes job and result on DELETE', async () => {
     t = await createTestApp();
     const { jobId } = (await submit(makeDocx(['bye']), 'a.docx')).json();
