@@ -164,6 +164,38 @@ Trước bước 3 phải sửa `recover()` trong `src/jobService.ts`: hàm này
 | Gateway không trả lời, kể cả `/healthz`, log lặp `redis: ...` | Gateway khởi động khi Redis chưa lên nên chưa mở cổng; container vẫn `running` | Bật lại Redis, gateway tự mở cổng, không cần restart |
 | Lộ API key | Log theo app | Thêm key mới, ra bản app mới, rồi mới thu hồi key cũ; thu hồi sớm làm hỏng bản app đang dùng key đó |
 
+### Cập nhật phiên bản
+
+Repo chưa có deploy tự động; push code hay tag không tự lên server. Quy trình này chưa chạy trên server thật.
+
+**Phát hành:**
+1. Sửa code trên nhánh mới, mở PR, CI xanh rồi merge vào `main`.
+2. Đẩy tag version, ví dụ `v0.1.2`. Workflow `Release image` đẩy lên ghcr.io các tag `0.1.2`, `0.1` và `latest`.
+3. Báo người vận hành version mới và các biến môi trường thay đổi, nếu có.
+
+**Cập nhật trên server:** trong `docker-compose.yml`, đổi `image:` của `gateway` sang tag mới, rồi chạy:
+
+```bash
+docker compose pull gateway
+docker compose up -d gateway
+curl -s localhost:8080/readyz
+```
+
+Sau đó convert thử một file. Gotenberg và Redis không cần đụng tới.
+
+**Rollback:** đổi tag về version cũ rồi chạy lại `pull` và `up`. Dùng tag version cụ thể, không dùng `latest`, để biết chính xác đang chạy bản nào và lùi được.
+
+**Khi cập nhật:**
+- Chỉ có một gateway nên có gián đoạn ngắn, chưa đo thời gian; nên làm vào giờ thấp điểm.
+- Job còn file gốc được chạy lại khi gateway khởi động (đã kiểm chứng ở mục 7 khi kill gateway). Request đồng bộ `/convert_to_pdf` đang chờ có thể bị ngắt và người dùng phải gửi lại.
+- Không chạy `docker compose down -v`: lệnh này xoá dữ liệu Redis và file đang lưu.
+- Chỉ đổi cấu hình: sửa `.env` rồi chạy `docker compose up -d gateway`, không cần image mới.
+
+**Khi sửa code:**
+- Giữ tương thích với app đã phát hành, vì không thể ép người dùng cập nhật ngay: chỉ thêm mới, không đổi hoặc xoá API đang dùng. Chỉ tắt `/convert_to_pdf` khi bản app cũ gần hết người dùng.
+- Đổi logic khiến cùng một file ra PDF khác thì tăng `CONVERSION_REVISION`.
+- Nâng version Gotenberg phải đổi cả `docker-compose.yml` và `.github/workflows/ci.yml`, vì job test của CI ghim version riêng. Redis chỉ ghim trong `docker-compose.yml`. Chạy CI và thử lại trước khi đưa lên server.
+
 ### Việc định kỳ
 
 - **Sao lưu:** gần như chỉ cần giữ `.env`, tài liệu người dùng chỉ lưu tạm. Mất Redis thì job đang chạy mất theo và người dùng phải gửi lại file.
