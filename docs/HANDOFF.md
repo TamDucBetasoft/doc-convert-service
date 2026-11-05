@@ -80,6 +80,20 @@ Chi tiết kỹ thuật: [`README.md`](../README.md) · hợp đồng API: [`ope
 | `.doc`, `.xls` có mật khẩu | Trả 422 `conversion_failed` sau khoảng 1 s, không treo |
 | Image `0.1.1` bản arm64, pull từ ghcr.io (2026-11-05) | Cả stack healthy; `.docx`, `.xlsx` qua `/v2/convert` và `/convert_to_pdf` đều ra PDF; test e2e đạt 9/9 |
 | Gateway khởi động khi Redis tắt | Không crash, không restart nhưng chưa mở cổng, nên `/healthz` và `/readyz` đều không kết nối được (theo dõi 25 s). Bật Redis thì khoảng 6 s sau gateway sẵn sàng và convert được |
+| App thật gọi `/convert_to_pdf` trên image `0.1.1` (2026-11-05, máy Android qua `adb reverse`) | `.docx`, `.xlsx`, `.doc`, `.xls` ra PDF và vào màn in đúng số trang; file có mật khẩu nhận 422, file 21 MB nhận 413, Gotenberg tắt nhận 503 |
+| Số container theo tải | Gửi đồng thời 1, 10 và 30 file khác nhau: luôn 3 container, ID không đổi. Gateway không có code tạo container và không mount `docker.sock`; số bản Gotenberg chỉ tăng khi người vận hành chạy `--scale` |
+
+Đo dồn tải (2026-11-05): gửi N file khác nhau trong cùng một lúc qua `/convert_to_pdf`, nới trần rate limit để đo năng lực convert. Không có lỗi kết nối; stack vẫn healthy sau khi đo.
+
+| Cấu hình | N | Thành công | Bị từ chối / quá hạn | p50 | Tốc độ |
+|---|---|---|---|---|---|
+| Mặc định (`WORKER_CONCURRENCY=2`, `QUEUE_MAX_PENDING=50`) | 100 | 52% | 48 `503 queue_full` | 5,8 s | 4,5 file/s |
+| Mặc định | 1000 | 7% | 932 `503 queue_full` | 8,8 s | 4,2 file/s |
+| `QUEUE_MAX_PENDING=5000` | 100 | 100% | 0 | 13,8 s | 3,8 file/s |
+| `QUEUE_MAX_PENDING=5000` | 1000 | 34% | 660 `504 conversion_timeout` | 49,2 s | 3,5 file/s |
+| 3 Gotenberg, `WORKER_CONCURRENCY=6`, `QUEUE_MAX_PENDING=5000` | 1000 | 55% | 450 `504 conversion_timeout` | 35,5 s | 5,5 file/s |
+
+Giới hạn của số liệu: file `.docx` 1 trang rất nhỏ, chạy trên Mac arm64 qua colima, gọi thẳng không qua mạng và Nginx. Chỉ dùng để thấy hành vi khi quá tải, chưa dùng để tính cấu hình server; file Office thật sẽ chậm hơn.
 
 Lỗi tìm được và đã sửa:
 - Khi engine sập, endpoint kết quả và cả `/convert_to_pdf` trả 422 khiến app báo "file hỏng". Giờ trả 503 kèm `Retry-After`.
@@ -94,7 +108,7 @@ Chưa có bằng chứng:
 
 | Hạng mục | Hiện trạng |
 |---|---|
-| Đo tải | Có `loadtest/convert.js` nhưng chưa chạy; "20–40 file/phút trên 1 vCPU" chỉ là ước tính |
+| Đo tải trên server thật | Mới đo dồn tải với file nhỏ trên Mac (bảng trên). `loadtest/convert.js` chưa chạy; "20–40 file/phút trên 1 vCPU" chỉ là ước tính |
 | Production | Chưa chạy thử với domain, HTTPS và Nginx |
 | Đầy ổ đĩa | Chưa thử |
 | Nhiều gateway | Chưa thử; cần đổi code (mục 8) |
@@ -125,6 +139,8 @@ Stage build chạy trên kiến trúc của máy build rồi chép `node_modules
 ### Scale
 
 Dấu hiệu cần scale: `pcs_queue_depth` cao kéo dài, `pcs_conversion_duration_seconds` tăng, nhiều `503 queue_full`.
+
+Chỉnh hàng đợi theo tốc độ đo được: `QUEUE_MAX_PENDING` ≈ tốc độ (file/s) × `SYNC_WAIT_MS` (giây). Hàng đợi 50 đang nhỏ: ở mức 3,5 file/s đo ở mục 7 và chờ 90 s thì khoảng 300 là vừa. Lớn hơn nữa chỉ đổi `503 queue_full` thành `504 conversion_timeout`, không làm convert nhanh hơn. Phải đo lại tốc độ trên server thật với file thật trước khi đặt giá trị này.
 
 | Bước | Làm gì | Đổi code? |
 |---|---|---|
