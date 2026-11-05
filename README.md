@@ -56,6 +56,8 @@ npm ci
 npm test                          # unit + API test (không cần Docker)
 npm run typecheck
 GOTENBERG_URL=http://localhost:3000 npm test   # thêm test với Gotenberg thật
+# Test trên stack đang chạy; test này cố ý tắt và kill container, không chạy vào server thật
+STACK_URL=http://localhost:8080 STACK_API_KEY=<key> STACK_COMPOSE="docker compose" npm test -- test/stack.e2e.test.ts
 npm run dev                       # chạy gateway ngoài Docker (cần Redis + Gotenberg)
 ```
 
@@ -80,7 +82,7 @@ rồi đặt `GOTENBERG_URL=http://localhost:3000 REDIS_URL=redis://localhost:63
 
 | File | Chạy khi | Làm gì |
 |---|---|---|
-| `.github/workflows/ci.yml` | Push lên `main`, mở/cập nhật PR | `typecheck` + toàn bộ test, gồm test với Gotenberg thật; sau đó dựng cả stack Docker và gọi thử `/v2/convert`, `/convert_to_pdf`, kiểm `401` |
+| `.github/workflows/ci.yml` | Push lên `main`, mở/cập nhật PR | `typecheck` + toàn bộ test, gồm test với Gotenberg thật; sau đó dựng cả stack Docker, gọi thử `/v2/convert`, `/convert_to_pdf`, kiểm `401`, rồi chạy `test/stack.e2e.test.ts` (luồng `/v2/jobs`, Redis thật, Gotenberg/Redis lỗi) |
 | `.github/workflows/release.yml` | Push tag `vX.Y.Z` | Chạy test, rồi build image amd64 + arm64 và đẩy lên `ghcr.io/<owner>/<repo>:X.Y.Z`, `:X.Y`, `:latest` |
 | `.github/dependabot.yml` | Thứ Hai hằng tuần | Mở PR nâng npm (gộp minor/patch), Node base image, Gotenberg/Redis trong compose, GitHub Actions |
 
@@ -109,7 +111,7 @@ Chi tiết: [`openapi.yaml`](openapi.yaml). Mọi response có header `x-request
 |---|---|---|
 | `POST /v2/jobs` | `X-Api-Key` | Multipart field `file`. Trả `202 {jobId, status:"queued", pollAfterMs}`; `200` nếu trúng cache |
 | `GET /v2/jobs/{id}` | `X-Api-Key` | `queued` / `processing` / `done` (+`pageCount`) / `failed` (+`error`) |
-| `GET /v2/jobs/{id}/result` | `X-Api-Key` | PDF; `409` chưa xong, `410` đã hết hạn, `422` convert lỗi |
+| `GET /v2/jobs/{id}/result` | `X-Api-Key` | PDF; `409` chưa xong, `410` đã hết hạn, `422` convert lỗi, `503` engine tạm lỗi (kèm `Retry-After`), `504` quá thời gian |
 | `DELETE /v2/jobs/{id}` | `X-Api-Key` | Xoá job và PDF ngay |
 | `POST /v2/convert` | `X-Api-Key` | Đồng bộ, trả PDF trong response |
 | `POST /convert_to_pdf` | không | **Hợp đồng cũ**, giữ cho app đã phát hành. Tắt bằng `LEGACY_ENDPOINT_ENABLED=false` |
@@ -129,11 +131,12 @@ Mã lỗi (`{"code","message"}`; client rẽ nhánh theo `code`, không theo `me
 | 409 | `job_not_ready` | Hỏi trạng thái tiếp |
 | 410 | `result_expired` | Gửi lại file |
 | 413 | `file_too_large` | Báo "file quá lớn" |
-| 415 | `unsupported_format` | Báo "định dạng không hỗ trợ / file có mật khẩu" |
-| 422 | `archive_rejected`, `conversion_failed` | Báo "file bị hỏng, không đọc được" |
+| 415 | `unsupported_format` | Báo "định dạng không hỗ trợ / file có mật khẩu" (`.docx`, `.xlsx`, `.pptx` có mật khẩu) |
+| 422 | `archive_rejected`, `conversion_failed` | Báo "file bị hỏng hoặc có mật khẩu, không đọc được" (`.doc`, `.xls` có mật khẩu rơi vào đây) |
 | 429 | `rate_limited` | Đợi `Retry-After` giây |
 | 503 | `queue_full`, `engine_unavailable`, `interrupted` | Thử lại sau `Retry-After` |
 | 504 | `conversion_timeout` | File quá phức tạp; cho thử lại một lần |
+| 500 | `internal_error` | Lỗi server, ví dụ Redis đang lỗi; cho thử lại sau |
 
 ---
 
@@ -202,6 +205,7 @@ Mỗi lần đổi logic chuẩn bị/convert khiến cùng một file ra PDF kh
 3. **Secrets.** Sinh key bằng `openssl rand -hex 24`. Để trong `.env` trên server hoặc secret manager, **không commit**.
    Gateway sẽ không khởi động ở production nếu key vẫn là `CHANGE_ME`.
 4. **Firewall.** Chỉ mở 443 (và 22 cho SSH bằng key, tắt đăng nhập mật khẩu). Không mở 3000/6379 ra ngoài.
+   Compose mặc định chỉ mở gateway trên `127.0.0.1:8080`, vì Docker publish cổng đi vòng qua `ufw`. Nếu proxy ở máy khác, đặt `GATEWAY_PORT` và tự chặn bằng firewall ngoài máy (của nhà cung cấp cloud).
 5. **Ổ đĩa.** `convert-data` chứa file tạm và PDF tối đa khoảng 2 × TTL; theo dõi dung lượng. Cấu hình xoay vòng log của Docker
    (`/etc/docker/daemon.json`: `"log-opts": {"max-size": "10m", "max-file": "5"}`).
 6. **Cảnh báo tối thiểu.** Uptime check vào `/readyz`; cảnh báo khi:
