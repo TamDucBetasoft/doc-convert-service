@@ -157,7 +157,12 @@ export class JobService {
     if (job.status === 'queued' || job.status === 'processing') throw Errors.jobNotReady();
     if (job.status === 'failed') {
       const code = job.error?.code ?? 'conversion_failed';
-      throw new AppError(code === 'conversion_timeout' ? 504 : 422, code, job.error?.message ?? 'Conversion failed');
+      const message = job.error?.message ?? 'Conversion failed';
+      if (code === 'conversion_timeout') throw new AppError(504, code, message);
+      if (code === 'engine_unavailable' || code === 'interrupted') {
+        throw new AppError(503, code, message, { 'retry-after': String(this.deps.config.queue.retryAfterSeconds) });
+      }
+      throw new AppError(422, code, message);
     }
     const path = this.deps.storage.resultPath(resultKey(job.sha256));
     if (!(await this.deps.storage.exists(path))) throw Errors.resultExpired();

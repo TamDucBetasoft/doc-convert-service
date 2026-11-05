@@ -85,6 +85,7 @@ paths:
         '409': { $ref: '#/components/responses/Error' }
         '410': { $ref: '#/components/responses/Error' }
         '422': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Retryable' }
         '504': { $ref: '#/components/responses/Error' }
 
   /v2/convert:
