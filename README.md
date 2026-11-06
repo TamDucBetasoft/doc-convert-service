@@ -76,30 +76,40 @@ rồi đặt `GOTENBERG_URL=http://localhost:3000 REDIS_URL=redis://localhost:63
 | `src/routes/` | `/convert_to_pdf`, `/v2/convert`, `/v2/jobs*`, `/healthz`, `/readyz`, `/metrics` |
 | `openapi.yaml` | Đặc tả API đầy đủ |
 | `loadtest/convert.js` | Kịch bản k6 |
-| `.github/` | CI, phát hành image, Dependabot |
+| `.github/` | CI, build/push image, deploy, Dependabot |
 
 ## CI, phát hành và cập nhật thư viện
 
 | File | Chạy khi | Làm gì |
 |---|---|---|
 | `.github/workflows/ci.yml` | Push lên `main`, mở/cập nhật PR | `typecheck` + toàn bộ test, gồm test với Gotenberg thật; sau đó dựng cả stack Docker, gọi thử `/v2/convert`, `/convert_to_pdf`, kiểm `401`, rồi chạy `test/stack.e2e.test.ts` (luồng `/v2/jobs`, Redis thật, Gotenberg/Redis lỗi) |
-| `.github/workflows/release.yml` | Push tag `vX.Y.Z` | Chạy test, rồi build image amd64 + arm64 và đẩy lên `ghcr.io/<owner>/<repo>:X.Y.Z`, `:X.Y`, `:latest` |
+| `.github/workflows/build-push.yml` | CI xanh trên `main`; tag `vX.Y.Z`; chạy tay | Build image amd64 + arm64 và đẩy `ghcr.io/<owner>/<repo>`. `main` gắn `:latest` và `:sha-<short>`. Tag gắn `:X.Y.Z`, `:X.Y` và `:sha-<short>`. `:latest` chỉ theo `main` |
+| `.github/workflows/deploy.yml` | Image trên `main` đẩy xong; chạy tay | SSH lên server, ghi `.env` từ secret, `docker compose pull` gateway rồi `up -d --no-build`, kiểm `/readyz`. Chạy tay với `image_tag` (`latest`, `sha-<short>`, `X.Y.Z`) để ghim bản hoặc rollback |
 | `.github/dependabot.yml` | Thứ Hai hằng tuần | Mở PR nâng npm (gộp minor/patch), Node base image, Gotenberg/Redis trong compose, GitHub Actions |
 
-Phát hành một bản:
+Merge vào `main` và CI xanh thì `:latest` được đẩy lên GHCR và server tự deploy. Workflow `workflow_run` chỉ kích hoạt khi file workflow đã nằm trên nhánh mặc định. Ghim một version để rollback:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.1.2 && git push origin v0.1.2
 ```
 
-Server khi đó chỉ cần `docker pull ghcr.io/<owner>/<repo>:0.1.0` thay cho `build: .` trong compose.
-Image trên ghcr.io mặc định là private, nên server cần `docker login ghcr.io` bằng token có quyền `read:packages`.
+Tag đẩy `:0.1.2` và `:0.1`. Server tiếp tục chạy `:latest` cho đến khi chạy tay **Deploy to Production** với `image_tag` đó. Image trên ghcr.io mặc định là private; job deploy tự `docker login ghcr.io` bằng `GITHUB_TOKEN` (quyền `packages: read`) rồi đăng xuất.
+
+Local và CI vẫn build từ source (`docker compose up --build`, chỉ file `docker-compose.yml`). Server dùng thêm [`docker-compose.prod.yml`](docker-compose.prod.yml) để pull image đã phát hành.
+
+Secret đặt ở repository (Settings → Secrets and variables → Actions). Thiếu secret bắt buộc thì deploy dừng trước khi SSH.
+
+- Bắt buộc: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH`, `API_KEYS` (`appId:key`, key ≥ 24 ký tự).
+- Tuỳ chọn: `DEPLOY_PORT` (mặc định 22), `LEGACY_ENDPOINT_ENABLED`, `METRICS_TOKEN`, `TRUST_PROXY`, `LOG_LEVEL`, `GATEWAY_PORT`, và các giới hạn file / hàng đợi / rate limit (`MAX_FILE_BYTES`, `WORKER_CONCURRENCY`, `QUEUE_MAX_PENDING`, …). Secret bỏ trống thì dùng default trong [`.env.example`](.env.example) và [`src/config.ts`](src/config.ts).
+
+Máy đích cần Docker Compose v2, user SSH thuộc group `docker`, và thư mục `DEPLOY_PATH` đã tồn tại. Gateway mặc định chỉ lắng nghe `127.0.0.1:8080`.
 
 Thiết lập cần bật tay trong GitHub (Settings, quyền admin):
 - **Branches → Branch protection** cho `main`: bắt buộc qua PR, bắt buộc check `Typecheck and test` và `Docker stack smoke test` xanh.
 - **Code security**: bật *Dependabot alerts* và *Dependabot security updates*.
 - **Collaborators**: thêm CTO, hoặc chuyển repo sang organization của công ty.
-- **Actions → General**: giữ quyền mặc định của `GITHUB_TOKEN` là read; workflow release tự xin `packages: write`.
+- **Actions → General**: giữ quyền mặc định của `GITHUB_TOKEN` là read. Workflow build tự xin `packages: write`; workflow deploy tự xin `packages: read`.
+- **Environments → production**: tuỳ chọn, admin mới tạo được. Bật required reviewer nếu muốn duyệt trước khi SSH; khi đó thêm `environment: production` vào job deploy và khai secret ở environment đó.
 
 ---
 

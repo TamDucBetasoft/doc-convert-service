@@ -1,0 +1,6 @@
+# Production overlay: pull the published gateway image instead of building on the server.
+# Local dev and CI keep using docker-compose.yml alone (`up --build`).
+services:
+  gateway:
+    image: ${GHCR_REPO}:${IMAGE_TAG:-latest}
+    pull_policy: always

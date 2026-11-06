@@ -26,7 +26,7 @@ Chi tiết kỹ thuật: [`README.md`](../README.md) · hợp đồng API: [`ope
 
 | # | Câu hỏi | Ghi chú |
 |---|---|---|
-| 1 | **Deploy ở đâu?** (VPS / AWS / GCP / k8s) | Cần ≥ 2 vCPU, 4 GB RAM cho 1 gateway + 1 Gotenberg. Image build sẵn: push tag `vX.Y.Z` → `ghcr.io/<owner>/doc-convert-service` |
+| 1 | **Deploy ở đâu?** (VPS / AWS / GCP / k8s) | Cần ≥ 2 vCPU, 4 GB RAM cho 1 gateway + 1 Gotenberg. CI xanh trên `main` đẩy `ghcr.io/<owner>/doc-convert-service:latest` và tự deploy. Tag `vX.Y.Z` đẩy `:X.Y.Z` và `:X.Y` để rollback |
 | 2 | **Domain + HTTPS** | Checklist Nginx (`client_max_body_size`, timeout, `TRUST_PROXY`) ở README mục "Triển khai production" |
 | 3 | **Ai nhận cảnh báo khi sập?** | Đã có `/readyz` và `/metrics` (Prometheus); chưa nối vào hệ thống giám sát nào |
 | 4 | **Giữ repo ở đâu?** | Đang ở tài khoản `TamDucBetasoft` (private) → nên chuyển sang organization công ty |
@@ -132,7 +132,7 @@ docker compose logs -f gateway
 
 Gateway mặc định chỉ mở trên `127.0.0.1:8080` để chỉ Nginx cùng máy gọi được, vì Docker publish cổng đi vòng qua `ufw`. Nếu proxy ở máy khác thì đặt `GATEWAY_PORT` và chặn bằng firewall của nhà cung cấp cloud.
 
-Image: build từ source như trên, hoặc dùng image đã phát hành `ghcr.io/tamducbetasoft/doc-convert-service:0.1.1` (amd64 và arm64). Tag `v0.1.0` không có image. Image đang private, nên cần quyền truy cập repo và `docker login ghcr.io` bằng token có `read:packages`; trong `docker-compose.yml`, thay `build: .` của service `gateway` bằng `image:` này. Nên dùng image theo version để rollback được; bản mới được tạo khi push tag `vX.Y.Z`.
+Image đã phát hành: `ghcr.io/tamducbetasoft/doc-convert-service` (amd64 và arm64). Tag `v0.1.0` không có image; `0.1.1` có. CI xanh trên `main` đẩy `:latest` và `:sha-<short>`. Tag `vX.Y.Z` đẩy `:X.Y.Z` và `:X.Y`. Trên server, [`docker-compose.prod.yml`](../docker-compose.prod.yml) trỏ gateway vào `${GHCR_REPO}:${IMAGE_TAG}`; workflow deploy ghi `.env` rồi pull image đó. Chạy local vẫn `docker compose up -d --build` với `docker-compose.yml`.
 
 Stage build chạy trên kiến trúc của máy build rồi chép `node_modules` sang image đích, nên chỉ đúng khi dependency production không có module native. Nếu thêm dependency native, phải đổi cách build; job `Build image for amd64 and arm64` trong CI chỉ kiểm tra build được, không kiểm tra module chạy đúng.
 
@@ -166,30 +166,21 @@ Trước bước 3 phải sửa `recover()` trong `src/jobService.ts`: hàm này
 
 ### Cập nhật phiên bản
 
-Repo chưa có deploy tự động; push code hay tag không tự lên server. Quy trình này chưa chạy trên server thật.
+Push `main` sau khi CI xanh thì tự build image và deploy `:latest`. Tag `vX.Y.Z` chỉ phát hành version để ghim hoặc rollback, không tự deploy. Job deploy đọc secret của repository (README mục CI).
 
 **Phát hành:**
 1. Sửa code trên nhánh mới, mở PR, CI xanh rồi merge vào `main`.
-2. Đẩy tag version, ví dụ `v0.1.2`. Workflow `Release image` đẩy lên ghcr.io các tag `0.1.2`, `0.1` và `latest`.
-3. Báo người vận hành version mới và các biến môi trường thay đổi, nếu có.
+2. CI xanh thì workflow **Build & Push Docker Images** đẩy `:latest` và `:sha-<short>`. Workflow **Deploy to Production** SSH lên server: copy `docker-compose.yml` và `docker-compose.prod.yml`, ghi `.env` (mode `600`), `docker login ghcr.io`, `docker compose pull gateway`, `up -d --no-build --remove-orphans`, rồi `curl` `/readyz`.
+3. Cần một version ghim được thì đẩy tag, ví dụ `v0.1.2`. Workflow đẩy `:0.1.2` và `:0.1`. Server vẫn chạy `:latest` cho đến khi deploy tay tag đó.
+4. Báo người vận hành nếu có biến môi trường mới. Biến mới cần default trong workflow deploy, hoặc thêm secret rồi chạy lại deploy.
 
-**Cập nhật trên server:** trong `docker-compose.yml`, đổi `image:` của `gateway` sang tag mới, rồi chạy:
-
-```bash
-docker compose pull gateway
-docker compose up -d gateway
-curl -s localhost:8080/readyz
-```
-
-Sau đó convert thử một file. Gotenberg và Redis không cần đụng tới.
-
-**Rollback:** đổi tag về version cũ rồi chạy lại `pull` và `up`. Dùng tag version cụ thể, không dùng `latest`, để biết chính xác đang chạy bản nào và lùi được.
+**Rollback hoặc ghim version:** Actions → **Deploy to Production** → Run workflow → `image_tag` = `0.1.1` hoặc `sha-<short>`. Cùng script SSH, không build trên server. Sau đó convert thử một file. Gotenberg và Redis không cần đụng tới.
 
 **Khi cập nhật:**
 - Chỉ có một gateway nên có gián đoạn ngắn, chưa đo thời gian; nên làm vào giờ thấp điểm.
 - Job còn file gốc được chạy lại khi gateway khởi động (đã kiểm chứng ở mục 7 khi kill gateway). Request đồng bộ `/convert_to_pdf` đang chờ có thể bị ngắt và người dùng phải gửi lại.
 - Không chạy `docker compose down -v`: lệnh này xoá dữ liệu Redis và file đang lưu.
-- Chỉ đổi cấu hình: sửa `.env` rồi chạy `docker compose up -d gateway`, không cần image mới.
+- Chỉ đổi cấu hình: sửa secret trên repository rồi chạy lại **Deploy to Production**. Workflow ghi lại `.env`. Không cần image mới.
 
 **Khi sửa code:**
 - Giữ tương thích với app đã phát hành, vì không thể ép người dùng cập nhật ngay: chỉ thêm mới, không đổi hoặc xoá API đang dùng. Chỉ tắt `/convert_to_pdf` khi bản app cũ gần hết người dùng.
@@ -208,7 +199,7 @@ Sau đó convert thử một file. Gotenberg và Redis không cần đụng tớ
 >
 > **Cần chuẩn bị:** server ≥ 2 vCPU, 4 GB RAM có Docker; một domain HTTPS, ví dụ `convert.<congty>.com`.
 >
-> **Image:** `ghcr.io/tamducbetasoft/doc-convert-service:0.1.1` (amd64 và arm64). Repo và image đang private, nên anh cần quyền truy cập repo và `docker login ghcr.io` bằng token có `read:packages`. Trong `docker-compose.yml`, thay `build: .` của service `gateway` bằng `image:` này. Nếu chưa tiện, có thể build từ source bằng `docker compose up -d --build`. Em đã chạy đủ stack với bản arm64; bản amd64 chưa convert lần nào, nên nếu server là amd64 thì bước chạy thử bên dưới là lần kiểm tra đầu tiên của bản này.
+> **Image và deploy:** merge vào `main`, CI xanh thì GitHub Actions đẩy `ghcr.io/<owner>/doc-convert-service:latest` (amd64 và arm64) rồi SSH deploy. Secret nằm ở repository, mục CI trong README (`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH`, `API_KEYS`). Máy cần Docker Compose v2, user SSH trong group `docker`, thư mục deploy đã tồn tại. Image đang private; job deploy tự `docker login ghcr.io` rồi đăng xuất. Bản `0.1.1` đã chạy thử arm64; nếu server là amd64 thì lần deploy đầu là lần convert amd64 đầu tiên.
 >
 > **Cần anh quyết:**
 > 1. Deploy ở đâu.
