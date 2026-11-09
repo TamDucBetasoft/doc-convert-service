@@ -30,7 +30,7 @@ services:
 
   gotenberg:
     # LibreOffice-only variant: no Chromium, smaller image and attack surface.
-    image: gotenberg/gotenberg:8.39.0-libreoffice
+    image: gotenberg/gotenberg:9.0.0-libreoffice
     command:
       - gotenberg
       - --api-timeout=90s
