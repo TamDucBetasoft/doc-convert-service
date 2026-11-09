@@ -14,9 +14,9 @@
   "license": "UNLICENSED",
   "description": "Office to PDF conversion gateway in front of Gotenberg",
   "dependencies": {
-    "@fastify/multipart": "^10.1.7",
-    "@fastify/rate-limit": "^11.2.1",
-    "fastify": "^5.12.7",
+    "@fastify/multipart": "^10.1.8",
+    "@fastify/rate-limit": "^11.2.2",
+    "fastify": "^5.12.8",
     "fflate": "^0.8.3",
     "ioredis": "^6.0.0",
     "pdf-lib": "^1.17.1",
@@ -29,7 +29,7 @@
     "@types/yauzl": "^3.4.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   },
   "private": true,
   "type": "module",
